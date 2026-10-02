@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  vps-agent:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vps-pulse-agent
+    restart: unless-stopped
+    network_mode: host # Permite coletar as interfaces reais de rede da VPS (eth0, etc.)
+    pid: host          # Permite visualizar todos os processos do host (/proc)
+    environment:
+      - VPS_PORT=8080
+      - VPS_TOKEN=
+      - VPS_STATIC_DIR=/app/static
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - ./frontend/dist:/app/static:ro
