@@ -10,6 +10,10 @@ const state = {
   isConnected: false,
   wsUrl: localStorage.getItem('vps_agent_url') || 'ws://localhost:8080/ws',
   wsToken: localStorage.getItem('vps_agent_token') || '',
+  collectMode: localStorage.getItem('vps_agent_mode') || 'local',
+  sshHost: localStorage.getItem('vps_agent_ssh_host') || '',
+  sshUser: localStorage.getItem('vps_agent_ssh_user') || 'root',
+  sshKey: localStorage.getItem('vps_agent_ssh_key') || '',
   ws: null,
   data: getInitialMockData(),
   processFilter: '',
@@ -413,6 +417,27 @@ function renderApp() {
             <label for="cfg-ws-token">Token Secreto (Bearer)</label>
             <input type="password" id="cfg-ws-token" class="form-input" value="${state.wsToken}" placeholder="Ex: meu-token-super-seguro">
           </div>
+          <div class="form-group">
+            <label for="cfg-collect-mode">Modo de Coleta</label>
+            <select id="cfg-collect-mode" class="form-input">
+               <option value="local" ${state.collectMode === 'local' ? 'selected' : ''}>Local (Agentless via gopsutil)</option>
+               <option value="ssh" ${state.collectMode === 'ssh' ? 'selected' : ''}>Remoto (Agentless via SSH)</option>
+            </select>
+          </div>
+          <div id="ssh-config-fields" style="display: ${state.collectMode === 'ssh' ? 'block' : 'none'}; padding-top: 10px; border-top: 1px solid var(--border-color); margin-top: 10px;">
+             <div class="form-group">
+                <label for="cfg-ssh-host">Endereço SSH (IP:Porta)</label>
+                <input type="text" id="cfg-ssh-host" class="form-input" value="${state.sshHost}" placeholder="192.168.1.10:22">
+             </div>
+             <div class="form-group">
+                <label for="cfg-ssh-user">Usuário SSH</label>
+                <input type="text" id="cfg-ssh-user" class="form-input" value="${state.sshUser}" placeholder="root">
+             </div>
+             <div class="form-group">
+                <label for="cfg-ssh-key">Chave Privada SSH</label>
+                <textarea id="cfg-ssh-key" class="form-input" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." rows="3">${state.sshKey}</textarea>
+             </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn-action" id="btn-cancel-settings">Cancelar</button>
@@ -681,6 +706,17 @@ function connectWebSocket() {
       state.isDemoMode = false;
       stopDemoLoop();
       updateConnBadge('connected', 'VPS Conectada');
+
+      if (state.collectMode === 'ssh') {
+        ws.send(JSON.stringify({
+          type: 'set_mode_ssh',
+          sshHost: state.sshHost,
+          sshUser: state.sshUser,
+          sshKey: state.sshKey
+        }));
+      } else {
+        ws.send(JSON.stringify({ type: 'set_mode_local' }));
+      }
     };
 
     ws.onmessage = (event) => {
@@ -691,6 +727,11 @@ function connectWebSocket() {
           updateUIValues(state.data);
         } else if (payload.type === 'log_chunk') {
           appendLog(payload.data);
+        } else if (payload.type === 'info') {
+          console.log('[INFO]', payload.data);
+        } else if (payload.type === 'error') {
+          console.error('[ERROR]', payload.data);
+          alert('Erro no agente: ' + payload.data);
         }
       } catch (err) {
         console.error('Erro ao processar pacote de telemetria:', err);
@@ -802,7 +843,31 @@ function setupEventListeners() {
   const btnCancelSettings = document.getElementById('btn-cancel-settings');
   const btnSaveSettings = document.getElementById('btn-save-settings');
 
-  if (btnSettings) btnSettings.addEventListener('click', () => modalSettings.classList.add('open'));
+  const modeSelect = document.getElementById('cfg-collect-mode');
+  const sshFields = document.getElementById('ssh-config-fields');
+  
+  if (modeSelect && sshFields) {
+    modeSelect.addEventListener('change', (e) => {
+      sshFields.style.display = e.target.value === 'ssh' ? 'block' : 'none';
+    });
+  }
+
+  if (btnSettings) {
+    btnSettings.addEventListener('click', () => {
+      document.getElementById('cfg-ws-url').value = state.wsUrl;
+      document.getElementById('cfg-ws-token').value = state.wsToken;
+      if (modeSelect) modeSelect.value = state.collectMode;
+      const hostInput = document.getElementById('cfg-ssh-host');
+      if (hostInput) hostInput.value = state.sshHost;
+      const userInput = document.getElementById('cfg-ssh-user');
+      if (userInput) userInput.value = state.sshUser;
+      const keyInput = document.getElementById('cfg-ssh-key');
+      if (keyInput) keyInput.value = state.sshKey;
+      
+      if (sshFields) sshFields.style.display = state.collectMode === 'ssh' ? 'block' : 'none';
+      modalSettings.classList.add('open');
+    });
+  }
   if (btnCloseSettings) btnCloseSettings.addEventListener('click', () => modalSettings.classList.remove('open'));
   if (btnCancelSettings) btnCancelSettings.addEventListener('click', () => modalSettings.classList.remove('open'));
 
@@ -810,10 +875,25 @@ function setupEventListeners() {
     btnSaveSettings.addEventListener('click', () => {
       const urlInput = document.getElementById('cfg-ws-url').value.trim();
       const tokenInput = document.getElementById('cfg-ws-token').value.trim();
+      const modeInput = document.getElementById('cfg-collect-mode') ? document.getElementById('cfg-collect-mode').value : 'local';
+      const sshHostInput = document.getElementById('cfg-ssh-host') ? document.getElementById('cfg-ssh-host').value.trim() : '';
+      const sshUserInput = document.getElementById('cfg-ssh-user') ? document.getElementById('cfg-ssh-user').value.trim() : '';
+      const sshKeyInput = document.getElementById('cfg-ssh-key') ? document.getElementById('cfg-ssh-key').value.trim() : '';
+
       state.wsUrl = urlInput || 'ws://localhost:8080/ws';
       state.wsToken = tokenInput;
+      state.collectMode = modeInput;
+      state.sshHost = sshHostInput;
+      state.sshUser = sshUserInput;
+      state.sshKey = sshKeyInput;
+
       localStorage.setItem('vps_agent_url', state.wsUrl);
       localStorage.setItem('vps_agent_token', state.wsToken);
+      localStorage.setItem('vps_agent_mode', state.collectMode);
+      localStorage.setItem('vps_agent_ssh_host', state.sshHost);
+      localStorage.setItem('vps_agent_ssh_user', state.sshUser);
+      localStorage.setItem('vps_agent_ssh_key', state.sshKey);
+
       modalSettings.classList.remove('open');
 
       if (!state.isDemoMode) {
