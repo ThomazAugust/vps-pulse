@@ -434,12 +434,24 @@ function renderApp() {
                 <input type="text" id="cfg-ssh-user" class="form-input" value="${state.sshUser}" placeholder="root">
              </div>
              <div class="form-group">
-                <label for="cfg-ssh-key">Chave Privada SSH</label>
-                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-                   <input type="file" id="cfg-ssh-key-file" style="font-size: 0.8rem;" accept=".pem,.key,">
-                   <button class="btn-action" id="btn-load-key" style="padding: 0.2rem 0.5rem; font-size: 0.8rem; background: var(--surface-light);">Carregar Arquivo</button>
+                <label>Método de Chave Privada</label>
+                <div style="display: flex; gap: 1rem; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-secondary);">
+                   <label style="display: flex; align-items: center; gap: 0.2rem; cursor: pointer;">
+                      <input type="radio" name="ssh-key-mode" value="file" checked> Carregar Arquivo
+                   </label>
+                   <label style="display: flex; align-items: center; gap: 0.2rem; cursor: pointer;">
+                      <input type="radio" name="ssh-key-mode" value="text"> Colar Texto
+                   </label>
                 </div>
-                <textarea id="cfg-ssh-key" class="form-input" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." rows="3">${state.sshKey}</textarea>
+                
+                <div id="ssh-key-file-wrap" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;">
+                   <input type="file" id="cfg-ssh-key-file" style="font-size: 0.8rem;" accept=".pem,.key,">
+                   <button class="btn-action" id="btn-load-key" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; background: var(--surface-light);">Ler Arquivo</button>
+                </div>
+                
+                <div id="ssh-key-text-wrap" style="display: none;">
+                   <textarea id="cfg-ssh-key" class="form-input" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." rows="3">${state.sshKey}</textarea>
+                </div>
              </div>
           </div>
         </div>
@@ -856,6 +868,24 @@ function setupEventListeners() {
     });
   }
 
+  const radioKeyModes = document.querySelectorAll('input[name="ssh-key-mode"]');
+  const sshKeyFileWrap = document.getElementById('ssh-key-file-wrap');
+  const sshKeyTextWrap = document.getElementById('ssh-key-text-wrap');
+
+  if (radioKeyModes.length) {
+     radioKeyModes.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+           if (e.target.value === 'file') {
+              if (sshKeyFileWrap) sshKeyFileWrap.style.display = 'flex';
+              if (sshKeyTextWrap) sshKeyTextWrap.style.display = 'none';
+           } else {
+              if (sshKeyFileWrap) sshKeyFileWrap.style.display = 'none';
+              if (sshKeyTextWrap) sshKeyTextWrap.style.display = 'block';
+           }
+        });
+     });
+  }
+
   const sshKeyFile = document.getElementById('cfg-ssh-key-file');
   const btnLoadKey = document.getElementById('btn-load-key');
   if (btnLoadKey && sshKeyFile) {
@@ -868,6 +898,7 @@ function setupEventListeners() {
       const reader = new FileReader();
       reader.onload = (e) => {
          document.getElementById('cfg-ssh-key').value = e.target.result;
+         alert("Arquivo lido com sucesso! A chave está em memória, você já pode Salvar e Conectar.");
       };
       reader.readAsText(file);
     });
