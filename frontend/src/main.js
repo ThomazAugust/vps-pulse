@@ -435,6 +435,10 @@ function renderApp() {
              </div>
              <div class="form-group">
                 <label for="cfg-ssh-key">Chave Privada SSH</label>
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                   <input type="file" id="cfg-ssh-key-file" style="font-size: 0.8rem;" accept=".pem,.key,">
+                   <button class="btn-action" id="btn-load-key" style="padding: 0.2rem 0.5rem; font-size: 0.8rem; background: var(--surface-light);">Carregar Arquivo</button>
+                </div>
                 <textarea id="cfg-ssh-key" class="form-input" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..." rows="3">${state.sshKey}</textarea>
              </div>
           </div>
@@ -849,6 +853,23 @@ function setupEventListeners() {
   if (modeSelect && sshFields) {
     modeSelect.addEventListener('change', (e) => {
       sshFields.style.display = e.target.value === 'ssh' ? 'block' : 'none';
+    });
+  }
+
+  const sshKeyFile = document.getElementById('cfg-ssh-key-file');
+  const btnLoadKey = document.getElementById('btn-load-key');
+  if (btnLoadKey && sshKeyFile) {
+    btnLoadKey.addEventListener('click', () => {
+      if (!sshKeyFile.files.length) {
+         alert("Por favor, selecione um arquivo de chave privada primeiro.");
+         return;
+      }
+      const file = sshKeyFile.files[0];
+      const reader = new FileReader();
+      reader.onload = (e) => {
+         document.getElementById('cfg-ssh-key').value = e.target.result;
+      };
+      reader.readAsText(file);
     });
   }
 

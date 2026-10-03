@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/joho/godotenv"
 	"vps-panel-agent/pkg/server"
 )
 
 func main() {
+	_ = godotenv.Load()
 	portFlag := flag.String("port", getEnv("VPS_PORT", "8080"), "Porta para execução do servidor (ex: 8080)")
 	tokenFlag := flag.String("token", getEnv("VPS_TOKEN", ""), "Token Bearer para autenticação de segurança (opcional)")
 	staticFlag := flag.String("static", getEnv("VPS_STATIC_DIR", "../frontend/dist"), "Diretório com os arquivos estáticos da SPA (opcional)")
