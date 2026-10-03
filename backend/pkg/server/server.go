@@ -15,6 +15,7 @@ import (
 	"vps-panel-agent/pkg/collector"
 	"vps-panel-agent/pkg/models"
 
+	"golang.org/x/crypto/ssh"
 	"github.com/gorilla/websocket"
 )
 
@@ -28,8 +29,8 @@ type Server struct {
 	port            string
 	token           string
 	staticDir       string
-	sysCollector    *collector.SystemCollector
-	dockerCollector *collector.DockerCollector
+	sysCollector    collector.SystemCollector
+	dockerCollector collector.DockerCollector
 
 	clientsMu sync.Mutex
 	clients   map[*websocket.Conn]bool
@@ -43,10 +44,47 @@ func NewServer(port, token, staticDir string) *Server {
 		port:            port,
 		token:           token,
 		staticDir:       staticDir,
-		sysCollector:    collector.NewSystemCollector(),
-		dockerCollector: collector.NewDockerCollector(),
+		sysCollector:    collector.NewLocalSystemCollector(),
+		dockerCollector: collector.NewLocalDockerCollector(),
 		clients:         make(map[*websocket.Conn]bool),
 	}
+}
+
+func (s *Server) setupSSH(host, user, key string) error {
+	signer, err := ssh.ParsePrivateKey([]byte(key))
+	if err != nil {
+		return err
+	}
+	config := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+	
+	if !strings.Contains(host, ":") {
+		host = host + ":22"
+	}
+	
+	client, err := ssh.Dial("tcp", host, config)
+	if err != nil {
+		return err
+	}
+
+	s.payloadMu.Lock()
+	s.sysCollector = collector.NewSSHSystemCollector(client)
+	s.dockerCollector = collector.NewSSHDockerCollector(client)
+	s.payloadMu.Unlock()
+	return nil
+}
+
+func (s *Server) setupLocal() {
+	s.payloadMu.Lock()
+	s.sysCollector = collector.NewLocalSystemCollector()
+	s.dockerCollector = collector.NewLocalDockerCollector()
+	s.payloadMu.Unlock()
 }
 
 func (s *Server) Start() error {
@@ -103,8 +141,13 @@ func (s *Server) telemetryLoop() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		h, cpu, mem, disks, net, procs := s.sysCollector.Collect()
-		dock := s.dockerCollector.Collect(context.Background())
+		s.payloadMu.RLock()
+		sysColl := s.sysCollector
+		dockColl := s.dockerCollector
+		s.payloadMu.RUnlock()
+
+		h, cpu, mem, disks, net, procs := sysColl.Collect()
+		dock := dockColl.Collect(context.Background())
 
 		payload := models.SystemPayload{
 			Host:      h,
@@ -216,7 +259,11 @@ func (s *Server) handleContainerRoutes(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 
-		if err := s.dockerCollector.Action(ctx, containerID, req.Action); err != nil {
+		s.payloadMu.RLock()
+		dockColl := s.dockerCollector
+		s.payloadMu.RUnlock()
+
+		if err := dockColl.Action(ctx, containerID, req.Action); err != nil {
 			http.Error(w, fmt.Sprintf("Erro ao executar ação %s: %v", req.Action, err), http.StatusInternalServerError)
 			return
 		}
@@ -235,7 +282,11 @@ func (s *Server) handleContainerRoutes(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
-		reader, err := s.dockerCollector.GetLogs(ctx, containerID, tail)
+		s.payloadMu.RLock()
+		dockColl := s.dockerCollector
+		s.payloadMu.RUnlock()
+
+		reader, err := dockColl.GetLogs(ctx, containerID, tail)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -291,14 +342,26 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			// Tratar mensagens recebidas do cliente (ex: subscribe_logs)
+			// Tratar mensagens recebidas do cliente
 			var clientMsg struct {
 				Type        string `json:"type"`
 				ContainerID string `json:"containerId"`
+				SSHHost     string `json:"sshHost,omitempty"`
+				SSHUser     string `json:"sshUser,omitempty"`
+				SSHKey      string `json:"sshKey,omitempty"`
 			}
 			if err := json.Unmarshal(message, &clientMsg); err == nil {
 				if clientMsg.Type == "subscribe_logs" && clientMsg.ContainerID != "" {
 					s.streamContainerLogs(conn, clientMsg.ContainerID)
+				} else if clientMsg.Type == "set_mode_ssh" {
+					if err := s.setupSSH(clientMsg.SSHHost, clientMsg.SSHUser, clientMsg.SSHKey); err != nil {
+						conn.WriteJSON(models.WsMessage{Type: "error", Data: fmt.Sprintf("Erro SSH: %v", err)})
+					} else {
+						conn.WriteJSON(models.WsMessage{Type: "info", Data: "Modo alterado para SSH com sucesso"})
+					}
+				} else if clientMsg.Type == "set_mode_local" {
+					s.setupLocal()
+					conn.WriteJSON(models.WsMessage{Type: "info", Data: "Modo alterado para Local com sucesso"})
 				}
 			}
 		}
