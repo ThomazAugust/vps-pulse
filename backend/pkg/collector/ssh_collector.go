@@ -9,7 +9,6 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"time"
 
 	"vps-panel-agent/pkg/models"
 
@@ -53,7 +52,6 @@ func (c *SSHSystemCollector) Collect() (models.HostInfo, models.CPUInfo, models.
 			}
 			
 			// Parse básico do free -b e df -B1 pode ser adicionado aqui iterando pelas linhas
-			inMem := false
 			inDf := false
 			for _, line := range lines {
 				if strings.HasPrefix(line, "Mem:") {
@@ -67,9 +65,7 @@ func (c *SSHSystemCollector) Collect() (models.HostInfo, models.CPUInfo, models.
 							memInfo.UsedPercent = float64(memInfo.Used) / float64(memInfo.Total) * 100.0
 						}
 					}
-					inMem = true
 				} else if strings.HasPrefix(line, "Filesystem") {
-					inMem = false
 					inDf = true
 				} else if inDf && len(line) > 0 && !strings.HasPrefix(line, "tmpfs") && !strings.HasPrefix(line, "devtmpfs") {
 					parts := strings.Fields(line)
