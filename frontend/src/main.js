@@ -463,7 +463,6 @@ function renderApp() {
                 
                 <div id="ssh-key-file-wrap" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center;">
                    <input type="file" id="cfg-ssh-key-file" style="font-size: 0.8rem;" accept=".pem,.key,">
-                   <button class="btn-action" id="btn-load-key" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; background: var(--surface-light);">Ler Arquivo</button>
                 </div>
                 
                 <div id="ssh-key-text-wrap" style="display: none;">
@@ -913,18 +912,19 @@ function setupEventListeners() {
   }
 
   const sshKeyFile = document.getElementById('cfg-ssh-key-file');
-  const btnLoadKey = document.getElementById('btn-load-key');
-  if (btnLoadKey && sshKeyFile) {
-    btnLoadKey.addEventListener('click', () => {
-      if (!sshKeyFile.files.length) {
-         alert("Por favor, selecione um arquivo de chave privada primeiro.");
-         return;
-      }
-      const file = sshKeyFile.files[0];
+  if (sshKeyFile) {
+    sshKeyFile.addEventListener('change', (e) => {
+      if (!e.target.files.length) return;
+      
+      const file = e.target.files[0];
       const reader = new FileReader();
-      reader.onload = (e) => {
-         document.getElementById('cfg-ssh-key').value = e.target.result;
-         alert("Arquivo lido com sucesso! A chave está em memória, você já pode Salvar e Conectar.");
+      reader.onload = (ev) => {
+         const keyInput = document.getElementById('cfg-ssh-key');
+         if (keyInput) {
+            keyInput.value = ev.target.result;
+            // Se quiser dar feedback visual discreto:
+            sshKeyFile.parentElement.setAttribute('title', 'Arquivo carregado na memória!');
+         }
       };
       reader.readAsText(file);
     });
