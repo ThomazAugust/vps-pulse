@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"vps-panel-agent/pkg/models"
 
@@ -21,6 +22,22 @@ type SSHSystemCollector struct {
 
 func NewSSHSystemCollector(client *ssh.Client) *SSHSystemCollector {
 	return &SSHSystemCollector{client: client}
+}
+
+func runWithTimeout(session *ssh.Session, cmd string, timeout time.Duration) ([]byte, error) {
+	done := make(chan struct{})
+	var out []byte
+	var err error
+	go func() {
+		out, err = session.Output(cmd)
+		close(done)
+	}()
+	select {
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("timeout executing ssh command")
+	case <-done:
+		return out, err
+	}
 }
 
 func (c *SSHSystemCollector) Collect() (models.HostInfo, models.CPUInfo, models.MemoryInfo, []models.DiskInfo, []models.NetInfo, []models.ProcessInfo) {
@@ -37,8 +54,8 @@ func (c *SSHSystemCollector) Collect() (models.HostInfo, models.CPUInfo, models.
 	session, err := c.client.NewSession()
 	if err == nil {
 		defer session.Close()
-		// Obtendo Hostname e Uptime
-		if out, err := session.Output("hostname; cat /proc/uptime; free -b; df -B1"); err == nil {
+		// Obtendo Hostname e Uptime com timeout de 3 segundos
+		if out, err := runWithTimeout(session, "hostname; cat /proc/uptime; free -b; df -B1", 3*time.Second); err == nil {
 			lines := strings.Split(string(out), "\n")
 			if len(lines) > 0 {
 				hostInfo.Hostname = strings.TrimSpace(lines[0])
@@ -108,7 +125,7 @@ func (d *SSHDockerCollector) Collect(ctx context.Context) models.DockerSummary {
 	defer session.Close()
 
 	// Obtém lista de containers
-	out, err := session.Output(`docker ps -a --format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","state":"{{.State}}","status":"{{.Status}}","ports":"{{.Ports}}"}'`)
+	out, err := runWithTimeout(session, `docker ps -a --format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","state":"{{.State}}","status":"{{.Status}}","ports":"{{.Ports}}"}'`, 3*time.Second)
 	if err != nil {
 		return summary
 	}

@@ -407,24 +407,41 @@ function renderApp() {
         </div>
         <div class="modal-body">
           <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.25rem;">
-            Insira o endereço WebSocket do agente Go em execução na sua VPS e a chave secreta de autenticação (se configurada).
+            Escolha como deseja monitorar seu servidor: através de um Agente já instalado ou via SSH diretamente.
           </p>
-          <div class="form-group">
-            <label for="cfg-ws-url">Endereço WebSocket do Agente</label>
-            <input type="text" id="cfg-ws-url" class="form-input" value="${state.wsUrl}" placeholder="ws://seu-ip-da-vps:8080/ws">
+
+          <div class="form-group" style="margin-bottom: 1.5rem;">
+             <label style="font-size: 0.9rem; font-weight: 500; margin-bottom: 0.8rem; display: block;">Modo de Conexão</label>
+             <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; background: var(--surface-light); padding: 0.8rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                   <input type="radio" name="cfg-connection-mode" value="local" ${state.collectMode === 'local' ? 'checked' : ''} style="margin-top: 0.2rem;">
+                   <div>
+                      <div style="font-weight: 500; margin-bottom: 0.2rem;">Agente Instalado (Recomendado)</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">Conecta diretamente a um VPS Pulse Agent já rodando no servidor destino.</div>
+                   </div>
+                </label>
+                <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; background: var(--surface-light); padding: 0.8rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                   <input type="radio" name="cfg-connection-mode" value="ssh" ${state.collectMode === 'ssh' ? 'checked' : ''} style="margin-top: 0.2rem;">
+                   <div>
+                      <div style="font-weight: 500; margin-bottom: 0.2rem;">Agentless (SSH Remoto)</div>
+                      <div style="font-size: 0.75rem; color: var(--text-muted);">Usa este servidor local para monitorar outra máquina remotamente via SSH.</div>
+                   </div>
+                </label>
+             </div>
           </div>
-          <div class="form-group">
-            <label for="cfg-ws-token">Token Secreto (Bearer)</label>
-            <input type="password" id="cfg-ws-token" class="form-input" value="${state.wsToken}" placeholder="Ex: meu-token-super-seguro">
+
+          <div id="cfg-mode-local-fields" style="display: ${state.collectMode === 'local' ? 'block' : 'none'}; padding-top: 10px; border-top: 1px solid var(--border-color);">
+             <div class="form-group">
+               <label for="cfg-ws-url">Endereço WebSocket do Agente</label>
+               <input type="text" id="cfg-ws-url" class="form-input" value="${state.wsUrl}" placeholder="ws://seu-ip-da-vps:8080/ws">
+             </div>
+             <div class="form-group">
+               <label for="cfg-ws-token">Token Secreto (Bearer)</label>
+               <input type="password" id="cfg-ws-token" class="form-input" value="${state.wsToken}" placeholder="Ex: meu-token-super-seguro">
+             </div>
           </div>
-          <div class="form-group">
-            <label for="cfg-collect-mode">Modo de Coleta</label>
-            <select id="cfg-collect-mode" class="form-input">
-               <option value="local" ${state.collectMode === 'local' ? 'selected' : ''}>Local (Agentless via gopsutil)</option>
-               <option value="ssh" ${state.collectMode === 'ssh' ? 'selected' : ''}>Remoto (Agentless via SSH)</option>
-            </select>
-          </div>
-          <div id="ssh-config-fields" style="display: ${state.collectMode === 'ssh' ? 'block' : 'none'}; padding-top: 10px; border-top: 1px solid var(--border-color); margin-top: 10px;">
+
+          <div id="cfg-mode-ssh-fields" style="display: ${state.collectMode === 'ssh' ? 'block' : 'none'}; padding-top: 10px; border-top: 1px solid var(--border-color);">
              <div class="form-group">
                 <label for="cfg-ssh-host">Endereço SSH (IP:Porta)</label>
                 <input type="text" id="cfg-ssh-host" class="form-input" value="${state.sshHost}" placeholder="192.168.1.10:22">
@@ -859,12 +876,21 @@ function setupEventListeners() {
   const btnCancelSettings = document.getElementById('btn-cancel-settings');
   const btnSaveSettings = document.getElementById('btn-save-settings');
 
-  const modeSelect = document.getElementById('cfg-collect-mode');
-  const sshFields = document.getElementById('ssh-config-fields');
+  const radioConnModes = document.querySelectorAll('input[name="cfg-connection-mode"]');
+  const localFields = document.getElementById('cfg-mode-local-fields');
+  const sshFields = document.getElementById('cfg-mode-ssh-fields');
   
-  if (modeSelect && sshFields) {
-    modeSelect.addEventListener('change', (e) => {
-      sshFields.style.display = e.target.value === 'ssh' ? 'block' : 'none';
+  if (radioConnModes.length) {
+    radioConnModes.forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        if (e.target.value === 'local') {
+          if (localFields) localFields.style.display = 'block';
+          if (sshFields) sshFields.style.display = 'none';
+        } else {
+          if (localFields) localFields.style.display = 'none';
+          if (sshFields) sshFields.style.display = 'block';
+        }
+      });
     });
   }
 
@@ -908,7 +934,7 @@ function setupEventListeners() {
     btnSettings.addEventListener('click', () => {
       document.getElementById('cfg-ws-url').value = state.wsUrl;
       document.getElementById('cfg-ws-token').value = state.wsToken;
-      if (modeSelect) modeSelect.value = state.collectMode;
+      
       const hostInput = document.getElementById('cfg-ssh-host');
       if (hostInput) hostInput.value = state.sshHost;
       const userInput = document.getElementById('cfg-ssh-user');
@@ -916,7 +942,13 @@ function setupEventListeners() {
       const keyInput = document.getElementById('cfg-ssh-key');
       if (keyInput) keyInput.value = state.sshKey;
       
+      // Select the correct radio option
+      const rd = document.querySelector(`input[name="cfg-connection-mode"][value="${state.collectMode}"]`);
+      if (rd) rd.checked = true;
+
+      if (localFields) localFields.style.display = state.collectMode === 'local' ? 'block' : 'none';
       if (sshFields) sshFields.style.display = state.collectMode === 'ssh' ? 'block' : 'none';
+
       modalSettings.classList.add('open');
     });
   }
@@ -925,16 +957,24 @@ function setupEventListeners() {
 
   if (btnSaveSettings) {
     btnSaveSettings.addEventListener('click', () => {
-      const urlInput = document.getElementById('cfg-ws-url').value.trim();
+      const selectedMode = document.querySelector('input[name="cfg-connection-mode"]:checked')?.value || 'local';
+      
+      let urlInput = document.getElementById('cfg-ws-url').value.trim();
       const tokenInput = document.getElementById('cfg-ws-token').value.trim();
-      const modeInput = document.getElementById('cfg-collect-mode') ? document.getElementById('cfg-collect-mode').value : 'local';
       const sshHostInput = document.getElementById('cfg-ssh-host') ? document.getElementById('cfg-ssh-host').value.trim() : '';
       const sshUserInput = document.getElementById('cfg-ssh-user') ? document.getElementById('cfg-ssh-user').value.trim() : '';
       const sshKeyInput = document.getElementById('cfg-ssh-key') ? document.getElementById('cfg-ssh-key').value.trim() : '';
 
+      if (selectedMode === 'ssh') {
+         // Auto infer wsUrl to self if using SSH agentless
+         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+         const host = window.location.host;
+         urlInput = `${proto}//${host}/ws`;
+      }
+
       state.wsUrl = urlInput || 'ws://localhost:8080/ws';
       state.wsToken = tokenInput;
-      state.collectMode = modeInput;
+      state.collectMode = selectedMode;
       state.sshHost = sshHostInput;
       state.sshUser = sshUserInput;
       state.sshKey = sshKeyInput;
