@@ -15,21 +15,21 @@ import (
 	"github.com/docker/docker/client"
 )
 
-type DockerCollector struct {
+type LocalDockerCollector struct {
 	cli *client.Client
 	mu  sync.Mutex
 }
 
-func NewDockerCollector() *DockerCollector {
+func NewLocalDockerCollector() *LocalDockerCollector {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		fmt.Printf("[Docker] Aviso: Docker client não inicializado: %v\n", err)
-		return &DockerCollector{cli: nil}
+		return &LocalDockerCollector{cli: nil}
 	}
-	return &DockerCollector{cli: cli}
+	return &LocalDockerCollector{cli: cli}
 }
 
-func (d *DockerCollector) Collect(ctx context.Context) models.DockerSummary {
+func (d *LocalDockerCollector) Collect(ctx context.Context) models.DockerSummary {
 	summary := models.DockerSummary{
 		Containers: []models.ContainerInfo{},
 	}
@@ -94,7 +94,7 @@ func (d *DockerCollector) Collect(ctx context.Context) models.DockerSummary {
 	return summary
 }
 
-func (d *DockerCollector) populateContainerStats(ctx context.Context, containerID string, info *models.ContainerInfo) {
+func (d *LocalDockerCollector) populateContainerStats(ctx context.Context, containerID string, info *models.ContainerInfo) {
 	statsCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
 	defer cancel()
 
@@ -160,7 +160,7 @@ func (d *DockerCollector) populateContainerStats(ctx context.Context, containerI
 	info.BlockWrite = writeTotal
 }
 
-func (d *DockerCollector) Action(ctx context.Context, containerID, action string) error {
+func (d *LocalDockerCollector) Action(ctx context.Context, containerID, action string) error {
 	if d.cli == nil {
 		return fmt.Errorf("docker indisponível")
 	}
@@ -175,12 +175,14 @@ func (d *DockerCollector) Action(ctx context.Context, containerID, action string
 		return d.cli.ContainerStop(ctx, containerID, stopOpts)
 	case "restart":
 		return d.cli.ContainerRestart(ctx, containerID, stopOpts)
+	case "remove", "delete":
+		return d.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 	default:
 		return fmt.Errorf("ação desconhecida: %s", action)
 	}
 }
 
-func (d *DockerCollector) GetLogs(ctx context.Context, containerID string, tail string) (io.ReadCloser, error) {
+func (d *LocalDockerCollector) GetLogs(ctx context.Context, containerID string, tail string) (io.ReadCloser, error) {
 	if d.cli == nil {
 		return nil, fmt.Errorf("docker indisponível")
 	}

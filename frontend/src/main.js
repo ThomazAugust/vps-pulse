@@ -1,5 +1,5 @@
 import './style.css';
-import { createIcons, Activity, Server, Cpu, HardDrive, Wifi, Box, Terminal, Play, Square, RotateCw, Settings, CheckCircle2, AlertTriangle, ShieldCheck, Search, X } from 'lucide';
+import { createIcons, Activity, Server, Cpu, HardDrive, Wifi, Box, Terminal, Play, Square, RotateCw, Trash2, Settings, CheckCircle2, AlertTriangle, ShieldCheck, Search, X } from 'lucide';
 import { getInitialMockData, tickMockData } from './mockData.js';
 import { MetricsCharts } from './charts.js';
 
@@ -605,8 +605,11 @@ function renderDockerContainers(containers, filter = '') {
                 <i data-lucide="square" style="width: 13px; height: 13px;"></i>
               </button>
             ` : `
-              <button class="btn-ctrl btn-container-action" data-action="start" data-id="${c.id}" title="Iniciar" style="color: var(--accent-green);">
+              <button class="btn-ctrl btn-container-action" data-action="start" data-id="${c.id}" data-name="${c.name}" title="Iniciar" style="color: var(--accent-green);">
                 <i data-lucide="play" style="width: 13px; height: 13px;"></i>
+              </button>
+              <button class="btn-ctrl btn-container-action" data-action="remove" data-id="${c.id}" data-name="${c.name}" title="Remover Contêiner" style="color: var(--accent-rose);">
+                <i data-lucide="trash-2" style="width: 13px; height: 13px;"></i>
               </button>
             `}
           </div>
@@ -646,7 +649,16 @@ function renderProcessesTable(processes, filter = '') {
 
 // Live UI Fast-Update (Without full DOM redraw for high fps)
 function updateUIValues(data) {
-  // Update header indicators
+  // Update header / VPS info strip
+  const valHostname = document.getElementById('val-hostname');
+  if (valHostname && data.host.hostname) valHostname.textContent = data.host.hostname;
+
+  const valOs = document.getElementById('val-os');
+  if (valOs && data.host.os) {
+    valOs.textContent = data.host.os;
+    valOs.setAttribute('title', data.host.os);
+  }
+
   const valUptime = document.getElementById('val-uptime');
   if (valUptime) valUptime.textContent = formatUptime(data.host.uptime);
 
@@ -659,6 +671,9 @@ function updateUIValues(data) {
   if (valCpu) valCpu.textContent = data.cpu.totalPercent.toFixed(1);
   if (barCpu) barCpu.style.width = `${data.cpu.totalPercent}%`;
 
+  const badgeCpuCores = document.getElementById('badge-cpu-cores');
+  if (badgeCpuCores && data.cpu.coresCount) badgeCpuCores.textContent = `${data.cpu.coresCount} Cores`;
+
   // RAM
   const valRam = document.getElementById('val-ram-percent');
   const barRam = document.getElementById('bar-ram-used');
@@ -669,13 +684,25 @@ function updateUIValues(data) {
   if (valRamUsed) valRamUsed.textContent = `${formatBytes(data.memory.used)} / ${formatBytes(data.memory.total)}`;
   if (valRamCache) valRamCache.textContent = formatBytes(data.memory.available);
 
+  // Disks (Overview main card and partitions list)
+  if (data.disks && data.disks.length > 0) {
+    const valDiskPercent = document.getElementById('val-disk-percent');
+    const barDiskUsed = document.getElementById('bar-disk-used');
+    if (valDiskPercent) valDiskPercent.textContent = data.disks[0].usedPercent.toFixed(1);
+    if (barDiskUsed) barDiskUsed.style.width = `${data.disks[0].usedPercent}%`;
+  }
+  const disksContainer = document.getElementById('disks-container');
+  if (disksContainer && state.activeTab === 'overview' && data.disks) {
+    disksContainer.innerHTML = renderDisks(data.disks);
+  }
+
   // Network
   const valNetRx = document.getElementById('val-net-rx');
   const valNetTx = document.getElementById('val-net-tx');
-  if (valNetRx && data.network[0]) {
+  if (valNetRx && data.network && data.network[0]) {
     valNetRx.textContent = (data.network[0].bytesRecvPerSec / (1024 * 1024)).toFixed(1);
   }
-  if (valNetTx && data.network[0]) {
+  if (valNetTx && data.network && data.network[0]) {
     valNetTx.textContent = `${formatBytes(data.network[0].bytesSentPerSec)}/s`;
   }
 
@@ -698,8 +725,8 @@ function updateUIValues(data) {
   }
 
   // Update Charts
-  const netIn = data.network[0]?.bytesRecvPerSec || 0;
-  const netOut = data.network[0]?.bytesSentPerSec || 0;
+  const netIn = data.network && data.network[0]?.bytesRecvPerSec || 0;
+  const netOut = data.network && data.network[0]?.bytesSentPerSec || 0;
   charts.update(data.cpu.totalPercent, netIn, netOut);
 
   // If on docker tab, update container cards
@@ -707,7 +734,7 @@ function updateUIValues(data) {
     const cardsContainer = document.getElementById('docker-cards-container');
     if (cardsContainer) {
       cardsContainer.innerHTML = renderDockerContainers(data.docker.containers, state.containerFilter);
-      createIcons({ icons: { Activity, Server, Cpu, HardDrive, Wifi, Box, Terminal, Play, Square, RotateCw, X } });
+      createIcons({ icons: { Activity, Server, Cpu, HardDrive, Wifi, Box, Terminal, Play, Square, RotateCw, Trash2, X } });
       bindContainerActionButtons();
     }
   }
@@ -838,7 +865,7 @@ function setupEventListeners() {
         const cardsContainer = document.getElementById('docker-cards-container');
         if (cardsContainer) {
           cardsContainer.innerHTML = renderDockerContainers(state.data.docker.containers, state.containerFilter);
-          createIcons({ icons: { Activity, Server, Cpu, HardDrive, Wifi, Box, Terminal, Play, Square, RotateCw, X } });
+          createIcons({ icons: { Activity, Server, Cpu, HardDrive, Wifi, Box, Terminal, Play, Square, RotateCw, Trash2, X } });
           bindContainerActionButtons();
         }
       }
@@ -988,9 +1015,17 @@ function setupEventListeners() {
 
       modalSettings.classList.remove('open');
 
-      if (!state.isDemoMode) {
-        connectWebSocket();
+      // Sempre que salvar novas configurações de conexão, sai do modo demo e conecta
+      state.isDemoMode = false;
+      stopDemoLoop();
+      const btnToggleDemo = document.getElementById('btn-toggle-demo');
+      if (btnToggleDemo) {
+        btnToggleDemo.classList.remove('btn-primary');
+        const spanText = btnToggleDemo.querySelector('span');
+        if (spanText) spanText.textContent = 'Modo Demonstração';
       }
+      updateConnBadge('reconnecting', 'Conectando ao Agente...');
+      connectWebSocket();
     });
   }
 
@@ -1037,17 +1072,24 @@ function setupEventListeners() {
 }
 
 function bindContainerActionButtons() {
-  // Container Action Buttons (Start, Stop, Restart)
+  // Container Action Buttons (Start, Stop, Restart, Remove)
   document.querySelectorAll('.btn-container-action').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
       const action = btn.getAttribute('data-action');
       const containerId = btn.getAttribute('data-id');
+      const containerName = btn.getAttribute('data-name') || containerId.substring(0, 10);
       
+      if (action === 'remove') {
+        const confirmed = confirm(`Tem certeza que deseja remover o contêiner "${containerName}"? Esta ação não pode ser desfeita.`);
+        if (!confirmed) return;
+      }
+
       if (state.isDemoMode) {
         // Simulated action
-        const container = state.data.docker.containers.find(c => c.id === containerId);
-        if (container) {
+        const idx = state.data.docker.containers.findIndex(c => c.id === containerId);
+        if (idx !== -1) {
+          const container = state.data.docker.containers[idx];
           if (action === 'stop') {
             container.state = 'exited';
             container.status = 'Exited (0) Just now';
@@ -1063,6 +1105,14 @@ function bindContainerActionButtons() {
           } else if (action === 'restart') {
             container.state = 'running';
             container.status = 'Up Less than a second';
+          } else if (action === 'remove') {
+            state.data.docker.containers.splice(idx, 1);
+            state.data.docker.total = Math.max(0, state.data.docker.total - 1);
+            if (container.state === 'running') {
+              state.data.docker.running = Math.max(0, state.data.docker.running - 1);
+            } else {
+              state.data.docker.stopped = Math.max(0, state.data.docker.stopped - 1);
+            }
           }
           updateUIValues(state.data);
         }
@@ -1072,6 +1122,9 @@ function bindContainerActionButtons() {
       // Live Agent HTTP Action
       try {
         const agentHttpUrl = state.wsUrl.replace(/^ws/, 'http').replace(/\/ws$/, '');
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+
         const res = await fetch(`${agentHttpUrl}/api/containers/${containerId}/action`, {
           method: 'POST',
           headers: {
@@ -1080,9 +1133,14 @@ function bindContainerActionButtons() {
           },
           body: JSON.stringify({ action })
         });
-        if (!res.ok) alert(`Falha na ação ${action}: ${await res.text()}`);
+        if (!res.ok) {
+          alert(`Falha na ação ${action}: ${await res.text()}`);
+        }
       } catch (err) {
         alert(`Erro de conexão com o agente: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+        btn.style.opacity = '1';
       }
     });
   });

@@ -7,8 +7,10 @@ services:
       dockerfile: Dockerfile
     container_name: vps-pulse-agent
     restart: unless-stopped
-    network_mode: host # Permite coletar as interfaces reais de rede da VPS (eth0, etc.)
-    pid: host          # Permite visualizar todos os processos do host (/proc)
+    #network_mode: host # Permite coletar as interfaces reais de rede da VPS (eth0, etc.)
+    pid: host # Permite visualizar todos os processos do host (/proc)
+    ports:
+      - "40000:8080"
     environment:
       - VPS_PORT=8080
       - VPS_TOKEN=

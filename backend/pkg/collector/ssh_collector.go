@@ -52,56 +52,78 @@ func (c *SSHSystemCollector) Collect() (models.HostInfo, models.CPUInfo, models.
 	procInfo := []models.ProcessInfo{}
 
 	session, err := c.client.NewSession()
-	if err == nil {
-		defer session.Close()
-		// Obtendo Hostname e Uptime com timeout de 3 segundos
-		if out, err := runWithTimeout(session, "hostname; cat /proc/uptime; free -b; df -B1", 3*time.Second); err == nil {
-			lines := strings.Split(string(out), "\n")
-			if len(lines) > 0 {
-				hostInfo.Hostname = strings.TrimSpace(lines[0])
+	if err != nil {
+		fmt.Printf("[SSH Collector] Erro ao criar session: %v\n", err)
+		return hostInfo, cpuInfo, memInfo, diskInfo, netInfo, procInfo
+	}
+	defer session.Close()
+
+	// Obtendo Hostname, Uptime, OS, Memória e Disco com timeout de 3 segundos
+	cmd := `hostname; cat /proc/uptime; grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"'; top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4}'; nproc; free -b; df -B1`
+	if out, err := runWithTimeout(session, cmd, 3*time.Second); err == nil {
+		lines := strings.Split(string(out), "\n")
+		if len(lines) > 0 && strings.TrimSpace(lines[0]) != "" {
+			hostInfo.Hostname = strings.TrimSpace(lines[0])
+		}
+		if len(lines) > 1 {
+			parts := strings.Fields(lines[1])
+			if len(parts) > 0 {
+				uptimeFloat, _ := strconv.ParseFloat(parts[0], 64)
+				hostInfo.Uptime = uint64(uptimeFloat)
 			}
-			if len(lines) > 1 {
-				parts := strings.Fields(lines[1])
-				if len(parts) > 0 {
-					uptimeFloat, _ := strconv.ParseFloat(parts[0], 64)
-					hostInfo.Uptime = uint64(uptimeFloat)
-				}
+		}
+		if len(lines) > 2 && strings.TrimSpace(lines[2]) != "" {
+			hostInfo.OS = strings.TrimSpace(lines[2])
+		}
+		if len(lines) > 3 {
+			if cpuUsage, err := strconv.ParseFloat(strings.TrimSpace(lines[3]), 64); err == nil {
+				cpuInfo.TotalPercent = cpuUsage
 			}
-			
-			// Parse básico do free -b e df -B1 pode ser adicionado aqui iterando pelas linhas
-			inDf := false
-			for _, line := range lines {
-				if strings.HasPrefix(line, "Mem:") {
-					parts := strings.Fields(line)
-					if len(parts) >= 7 {
-						memInfo.Total, _ = strconv.ParseUint(parts[1], 10, 64)
-						memInfo.Used, _ = strconv.ParseUint(parts[2], 10, 64)
-						memInfo.Free, _ = strconv.ParseUint(parts[3], 10, 64)
-						memInfo.Available, _ = strconv.ParseUint(parts[6], 10, 64)
-						if memInfo.Total > 0 {
-							memInfo.UsedPercent = float64(memInfo.Used) / float64(memInfo.Total) * 100.0
-						}
-					}
-				} else if strings.HasPrefix(line, "Filesystem") {
-					inDf = true
-				} else if inDf && len(line) > 0 && !strings.HasPrefix(line, "tmpfs") && !strings.HasPrefix(line, "devtmpfs") {
-					parts := strings.Fields(line)
-					if len(parts) >= 6 {
-						d := models.DiskInfo{
-							Device:     parts[0],
-							Mountpoint: parts[5],
-						}
-						d.Total, _ = strconv.ParseUint(parts[1], 10, 64)
-						d.Used, _ = strconv.ParseUint(parts[2], 10, 64)
-						d.Free, _ = strconv.ParseUint(parts[3], 10, 64)
-						if d.Total > 0 {
-							d.UsedPercent = float64(d.Used) / float64(d.Total) * 100.0
-						}
-						diskInfo = append(diskInfo, d)
-					}
+		}
+		if len(lines) > 4 {
+			if cores, err := strconv.Atoi(strings.TrimSpace(lines[4])); err == nil && cores > 0 {
+				cpuInfo.CoresCount = cores
+				cpuInfo.PerCorePercent = make([]float64, cores)
+				for i := range cpuInfo.PerCorePercent {
+					cpuInfo.PerCorePercent[i] = cpuInfo.TotalPercent
 				}
 			}
 		}
+		
+		inDf := false
+		for _, line := range lines {
+			if strings.HasPrefix(line, "Mem:") {
+				parts := strings.Fields(line)
+				if len(parts) >= 7 {
+					memInfo.Total, _ = strconv.ParseUint(parts[1], 10, 64)
+					memInfo.Used, _ = strconv.ParseUint(parts[2], 10, 64)
+					memInfo.Free, _ = strconv.ParseUint(parts[3], 10, 64)
+					memInfo.Available, _ = strconv.ParseUint(parts[6], 10, 64)
+					if memInfo.Total > 0 {
+						memInfo.UsedPercent = float64(memInfo.Used) / float64(memInfo.Total) * 100.0
+					}
+				}
+			} else if strings.HasPrefix(line, "Filesystem") {
+				inDf = true
+			} else if inDf && len(line) > 0 && !strings.HasPrefix(line, "tmpfs") && !strings.HasPrefix(line, "devtmpfs") {
+				parts := strings.Fields(line)
+				if len(parts) >= 6 {
+					d := models.DiskInfo{
+						Device:     parts[0],
+						Mountpoint: parts[5],
+					}
+					d.Total, _ = strconv.ParseUint(parts[1], 10, 64)
+					d.Used, _ = strconv.ParseUint(parts[2], 10, 64)
+					d.Free, _ = strconv.ParseUint(parts[3], 10, 64)
+					if d.Total > 0 {
+						d.UsedPercent = float64(d.Used) / float64(d.Total) * 100.0
+					}
+					diskInfo = append(diskInfo, d)
+				}
+			}
+		}
+	} else {
+		fmt.Printf("[SSH Collector] Erro ao executar comandos: %v\n", err)
 	}
 
 	return hostInfo, cpuInfo, memInfo, diskInfo, netInfo, procInfo
@@ -124,8 +146,9 @@ func (d *SSHDockerCollector) Collect(ctx context.Context) models.DockerSummary {
 	}
 	defer session.Close()
 
-	// Obtém lista de containers
-	out, err := runWithTimeout(session, `docker ps -a --format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","state":"{{.State}}","status":"{{.Status}}","ports":"{{.Ports}}"}'`, 3*time.Second)
+	// Obtém lista de containers (tenta docker direto, se falhar ou não tiver permissão, tenta sudo docker -n)
+	dockerCmd := `docker ps -a --format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","state":"{{.State}}","status":"{{.Status}}","ports":"{{.Ports}}"}' 2>/dev/null || sudo -n docker ps -a --format '{"id":"{{.ID}}","name":"{{.Names}}","image":"{{.Image}}","state":"{{.State}}","status":"{{.Status}}","ports":"{{.Ports}}"}' 2>/dev/null`
+	out, err := runWithTimeout(session, dockerCmd, 3*time.Second)
 	if err != nil {
 		return summary
 	}
@@ -168,12 +191,20 @@ func (d *SSHDockerCollector) Action(ctx context.Context, containerID, action str
 	}
 	defer session.Close()
 
-	// Validar action
-	if action != "start" && action != "stop" && action != "restart" {
+	var cmd string
+	switch action {
+	case "start":
+		cmd = fmt.Sprintf("docker start %s 2>/dev/null || sudo -n docker start %s", containerID, containerID)
+	case "stop":
+		cmd = fmt.Sprintf("docker stop %s 2>/dev/null || sudo -n docker stop %s", containerID, containerID)
+	case "restart":
+		cmd = fmt.Sprintf("docker restart %s 2>/dev/null || sudo -n docker restart %s", containerID, containerID)
+	case "remove", "delete":
+		cmd = fmt.Sprintf("docker rm -f %s 2>/dev/null || sudo -n docker rm -f %s", containerID, containerID)
+	default:
 		return fmt.Errorf("ação inválida: %s", action)
 	}
 
-	cmd := fmt.Sprintf("docker %s %s", action, containerID)
 	_, err = session.Output(cmd)
 	return err
 }

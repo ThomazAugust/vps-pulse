@@ -354,7 +354,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				if clientMsg.Type == "subscribe_logs" && clientMsg.ContainerID != "" {
 					s.streamContainerLogs(conn, clientMsg.ContainerID)
 				} else if clientMsg.Type == "set_mode_ssh" {
+					fmt.Printf("Recebido set_mode_ssh. Host: %s, User: %s, Key Length: %d\n", clientMsg.SSHHost, clientMsg.SSHUser, len(clientMsg.SSHKey))
+					if len(clientMsg.SSHKey) > 0 {
+						// printa os primeiros 30 chars pra ver se começa com -----BEGIN
+						fmt.Printf("Prefixo da chave: %q\n", clientMsg.SSHKey)
+					}
 					if err := s.setupSSH(clientMsg.SSHHost, clientMsg.SSHUser, clientMsg.SSHKey); err != nil {
+						fmt.Printf("Erro no setupSSH: %v\n", err)
 						conn.WriteJSON(models.WsMessage{Type: "error", Data: fmt.Sprintf("Erro SSH: %v", err)})
 					} else {
 						conn.WriteJSON(models.WsMessage{Type: "info", Data: "Modo alterado para SSH com sucesso"})

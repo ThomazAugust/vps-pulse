@@ -17,22 +17,22 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
-type SystemCollector struct {
+type LocalSystemCollector struct {
 	mu           sync.Mutex
 	lastNet      map[string]net.IOCountersStat
 	lastDisk     map[string]disk.IOCountersStat
 	lastTickTime time.Time
 }
 
-func NewSystemCollector() *SystemCollector {
-	return &SystemCollector{
+func NewLocalSystemCollector() *LocalSystemCollector {
+	return &LocalSystemCollector{
 		lastNet:      make(map[string]net.IOCountersStat),
 		lastDisk:     make(map[string]disk.IOCountersStat),
 		lastTickTime: time.Now(),
 	}
 }
 
-func (c *SystemCollector) Collect() (models.HostInfo, models.CPUInfo, models.MemoryInfo, []models.DiskInfo, []models.NetInfo, []models.ProcessInfo) {
+func (c *LocalSystemCollector) Collect() (models.HostInfo, models.CPUInfo, models.MemoryInfo, []models.DiskInfo, []models.NetInfo, []models.ProcessInfo) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
